@@ -1,0 +1,11 @@
+﻿code_dec,code_hex,shape_index,shape_name,color_index,color_name,image_path
+81,0x51,8,圆锥,0,红,images/CO-RED.png
+82,0x52,8,圆锥,1,橙,images/CO-ORANGE.png
+83,0x53,8,圆锥,2,黄,images/CO-YELLOW.png
+84,0x54,8,圆锥,3,绿,images/CO-GREEN.png
+85,0x55,8,圆锥,4,青,images/CO-CYAN.png
+86,0x56,8,圆锥,5,蓝,images/CO-BLUE.png
+87,0x57,8,圆锥,6,紫,images/CO-PURPLE.png
+88,0x58,8,圆锥,7,灰,images/CO-GRAY.png
+89,0x59,8,圆锥,8,黑,images/CO-BLACK.png
+90,0x5A,8,圆锥,9,白,images/CO-WHITE.png

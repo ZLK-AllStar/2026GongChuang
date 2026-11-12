@@ -1,0 +1,9 @@
+﻿code_dec,code_hex,shape_index,shape_name,color_index,color_name,image_path
+73,0x49,0,正四面体,9,白,images/RT-WHITE.png
+74,0x4A,1,三棱柱,9,白,images/TP-WHITE.png
+75,0x4B,2,五棱柱,9,白,images/PP-WHITE.png
+76,0x4C,3,六棱柱,9,白,images/HP-WHITE.png
+77,0x4D,4,圆柱形,9,白,images/CY-WHITE.png
+78,0x4E,5,长方体,9,白,images/CB-WHITE.png
+79,0x4F,6,正方体,9,白,images/CU-WHITE.png
+80,0x50,7,球体,9,白,images/SP-WHITE.png

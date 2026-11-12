@@ -1,0 +1,18 @@
+{
+  "version": 2,
+  "frame_width": 1280,
+  "frame_height": 720,
+  "coordinate_note": "pixel origin is top-left; +x is right; +y is down",
+  "x": 0.321875,
+  "y": 0.8833333333333333,
+  "width": 0.00546875,
+  "height": 0.011111111111111112,
+  "x_pixel": 412,
+  "y_pixel": 636,
+  "width_pixel": 7,
+  "height_pixel": 8,
+  "center_x": 0.325,
+  "center_y": 0.8888888888888888,
+  "center_x_pixel": 416,
+  "center_y_pixel": 640
+}

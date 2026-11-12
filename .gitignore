@@ -1,0 +1,75 @@
+# Keil MDK-ARM build artifacts
+*.o
+*.d
+*.crf
+*.axf
+*.hex
+*.bin
+*.elf
+*.map
+*.lst
+*.htm
+*.dep
+*.lnp
+*.sct
+*.build_log.htm
+*.iex
+*.bak
+
+# Keil per-target build output directories (e.g. MDK-ARM/<project>/, Listings/, DebugConfig/)
+MDK-ARM/*/
+MDK-ARM/DebugConfig/
+MDK-ARM/Listings/
+Listings/
+Objects/
+DebugConfig/
+
+# Keil user-specific GUI state (per-user window layout etc.)
+*.uvguix.*
+
+# JLink / ST-Link debugger temp files
+*.uvgui.*
+JLinkLog.txt
+
+# Reasonix AI workspace
+.agents/
+.reasonix/
+reasonix.toml
+
+# Editor / OS cruft
+Thumbs.db
+desktop.ini
+*.swp
+*~
+.DS_Store
+
+# Mechanical migration build logs (local validation only)
+MDK-ARM/build_mechanical*.log
+MDK-ARM/*.log
+
+# Stepper-motor reference examples (third-party demo projects, not part of this repository)
+步进电机示例/
+
+# Local IDE / assistant / diagram output
+.idea/
+.vscode/
+.archify/
+
+# Python caches and bytecode
+__pycache__/
+*.py[cod]
+
+# ApusIDE HMI build products and per-session IDE state
+HMI工程/temp/
+HMI工程/Debug/
+HMI工程/Release/
+HMI工程/win_build/
+HMI工程/.devicesetting/
+HMI工程/.settings/
+
+# Local camera / recognition captures
+captures/
+
+# Root-level reference photos (README copies live in docs/images/)
+/*.jpg
+/*.png

@@ -1,0 +1,25 @@
+[Unit]
+Description=HUATAI vision host (_cv2.py) with STM32 pick protocol and PE4 button trigger
+Documentation=file:/home/jetson/classic-new/SERIAL_PROTOCOL.md
+# 串口与本地文件系统就绪后启动；本服务不依赖图形桌面，可无 HDMI 运行。
+After=local-fs.target dev-ttyTHS1.device
+Wants=dev-ttyTHS1.device
+
+[Service]
+Type=simple
+User=jetson
+Group=jetson
+WorkingDirectory=/home/jetson/classic-new
+Environment=HOME=/home/jetson
+Environment=PYTHONUNBUFFERED=1
+# 开机后等 USB 摄像头枚举完成再打开（run_vision.sh 会先 sleep 这么多久）。
+Environment=HUATAI_CAMERA_DELAY_S=5
+# 硬件访问：/dev/ttyTHS1 属于 dialout，摄像头属于 video。
+SupplementaryGroups=dialout video
+ExecStart=/home/jetson/classic-new/scripts/run_vision.sh
+# 摄像头或串口异常退出（非零码）时自动重启，避免开机后无人值守的停机。
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
