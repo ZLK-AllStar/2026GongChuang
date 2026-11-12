@@ -2,7 +2,7 @@
 
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
 [![MCU](https://img.shields.io/badge/MCU-STM32F407ZGT6-03234B.svg)](#硬件组成)
-[![Host](https://img.shields.io/badge/Host-Jetson%20Orin%20Nano-76B900.svg)](#视觉上位机)
+[![Host](https://img.shields.io/badge/Host-Jetson%20Orin%20Nano-76B900.svg)](#2-运行-jetson-视觉上位机)
 
 基于 **STM32F407ZGT6 + Jetson Orin Nano + ApusIDE HMI** 的桌面级智能分拣工作站，面向 2026 年工创赛智能分拣赛项。
 
@@ -115,7 +115,7 @@ flowchart LR
 ├── 模型/                 省赛机械模型（SolidWorks 零件与装配）
 ├── letter-shell-3.1.2/   Letter Shell 源码（MIT）
 ├── HUATAI.ioc            CubeMX 工程配置（请勿手工编辑）
-└── HUATAI.sct            应用链接脚本
+└── .mxproject            CubeMX 工程缓存
 ```
 
 ---
