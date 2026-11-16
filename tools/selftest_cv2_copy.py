@@ -15,6 +15,11 @@ module = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = module
 spec.loader.exec_module(module)
 
+# Field scripts can have tuned coordinate offsets. Use a known baseline in this
+# isolated test module; nonzero corrections are exercised below. No files change.
+module.MACHINE_X_SCALE = module.MACHINE_Y_SCALE = 1.0
+module.MACHINE_X_OFFSET_MM = module.MACHINE_Y_OFFSET_MM = 0.0
+
 
 class FakeSerial:
     def __init__(self):
@@ -194,7 +199,7 @@ late_link.connection.pending.extend(module.build_status_packet(late_controller.s
 late_controller.update([], start + 88.1)
 check('queued DONE is processed before the 24-second timeout check', late_controller.state == 'DETECT' and late_controller.target is None)
 # Shape order must dominate geometry, colors and detector result order.
-expected_shapes = ('cuboid', 'cube', 'pentagonal_prism', 'cylinder', 'cone', 'regular_tetrahedron')
+expected_shapes = ('pentagonal_prism', 'cuboid', 'cube', 'cylinder', 'regular_tetrahedron', 'cone')
 check('model triangular pyramid maps to protocol tetrahedron',
       module.resolve_protocol_shape('triangular pyramid', 'red') == 'regular_tetrahedron')
 for color in ('red', 'white'):
@@ -209,7 +214,7 @@ for color in ('red', 'white'):
     clutter.command = None
     selector = module.PickController(make_link(), 2, 5.0, 1.0, pick_timeout)
     for permutation in itertools.permutations(ordered):
-        check('cuboid wins every detection permutation',
+        check('pentagonal prism wins every detection permutation',
               selector._select_target([*permutation, clutter], start) is ordered[0])
     for index, item in enumerate(ordered):
         check('remaining shapes follow requested order',
@@ -279,4 +284,41 @@ check('UART sends capped Y and a valid checksum',
       and capped_packet[-1] == sum(capped_packet[:-1]) & 255)
 cap_controller.update([], now + 11.2)
 check('retry preserves capped task coordinates', cap_link.connection.written == [capped_packet, capped_packet])
-print(f'PASS: {checks} checks; 24-second timeout, priority, X=215/Y=205 boundaries, upper Y clamp, fake UART only, no physical motion')
+
+# Exercise nonzero correction through detection, selection, serial locking and retry.
+correction_names = ('MACHINE_X_SCALE', 'MACHINE_Y_SCALE', 'MACHINE_X_OFFSET_MM', 'MACHINE_Y_OFFSET_MM')
+saved_correction = {name: getattr(module, name) for name in correction_names}
+try:
+    module.MACHINE_X_SCALE = 1.5
+    module.MACHINE_Y_SCALE = 0.5
+    module.MACHINE_X_OFFSET_MM = 3.0
+    module.MACHINE_Y_OFFSET_MM = -2.0
+    _, _, corrected = module.process_frame(frame, (0, 0, 80, 80), 1, 0.9, 0,
+                                            homography=homography, draw_result=False,
+                                            detector=FakeDetector())
+    check('detection stores coordinates corrected before Y limiting',
+          len(corrected) == 1 and corrected[0].machine_center == (33.0, 101.0))
+    corrected_link = make_link()
+    corrected_controller = module.PickController(corrected_link, 2, 5.0, 1.0, pick_timeout)
+    corrected_link.connection.pending.extend(module.build_key_packet(1, module.KEY_STATE_PRESS))
+    corrected_controller.update(corrected, now + 20)
+    corrected_controller.update(corrected, now + 20.1)
+    check('selection locks corrected target', corrected_controller.state == 'WAIT_ACK'
+          and corrected_controller.target.machine_center == (33.0, 101.0))
+    corrected_packet = corrected_link.connection.written[-1]
+    check('UART sends the corrected coordinates once',
+          int.from_bytes(corrected_packet[5:7], 'little') == 33
+          and int.from_bytes(corrected_packet[7:9], 'little') == 101)
+    corrected_controller.update([], now + 21.2)
+    check('retry does not apply coordinate correction again',
+          corrected_link.connection.written == [corrected_packet, corrected_packet])
+    module.MACHINE_X_OFFSET_MM = 220.0
+    _, _, outside = module.process_frame(frame, (0, 0, 80, 80), 1, 0.9, 0,
+                                         homography=homography, draw_result=False,
+                                         detector=FakeDetector())
+    check('corrected X beyond machine limit cannot be selected',
+          corrected_controller._select_target(outside, now + 22) is None)
+finally:
+    for name, value in saved_correction.items():
+        setattr(module, name, value)
+print(f'PASS: {checks} checks; 24-second timeout, priority, coordinate correction, X=215/Y=205 boundaries, fake UART only, no physical motion')

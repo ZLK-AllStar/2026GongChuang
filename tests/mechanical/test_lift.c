@@ -39,8 +39,13 @@ int main(void)
   assert(AuxServo_LiftDownFull() && AuxServo_GetLiftAngle() == AUX_SERVO_LIFT_DOWN_ANGLE_FULL);
   before = waits;
   assert(AuxServo_LiftTo(AUX_SERVO_LIFT_DOWN_ANGLE_CYLINDER));
-  assert(AuxServo_GetLiftAngle() == 130 && htim3.compare == 1462 && waits == before + 1);
+  assert(AuxServo_GetLiftAngle() == AUX_SERVO_LIFT_DOWN_ANGLE_CYLINDER && waits == before + 1);
   assert(AuxServo_LiftTo(AUX_SERVO_LIFT_DOWN_ANGLE_CYLINDER) && waits == before + 1);
+  assert(AuxServo_LiftUp() && AuxServo_GetLiftAngle() == AUX_SERVO_LIFT_UP_ANGLE);
+  before = waits;
+  assert(AuxServo_LiftTo(AUX_SERVO_LIFT_DOWN_ANGLE_PENTA_PRISM));
+  assert(AuxServo_GetLiftAngle() == 90 && htim3.compare == 1166 && waits == before + 1);
+  assert(AuxServo_LiftTo(AUX_SERVO_LIFT_DOWN_ANGLE_PENTA_PRISM) && waits == before + 1);
   assert(AuxServo_LiftUp() && AuxServo_GetLiftAngle() == AUX_SERVO_LIFT_UP_ANGLE);
   wait_ok = false;
   assert(!AuxServo_LiftTo(90) && AuxServo_GetLiftAngle() == 0xFFFFU);
@@ -49,6 +54,6 @@ int main(void)
   expired = true;
   before = pwm_writes;
   assert(!AuxServo_LiftTo(90) && pwm_writes == before);
-  puts("PASS lift: real PWM endpoints, cylinder 130deg/1462us/cache/lift, arbitrary angles, invalid targets, wait failure/recovery");
+  puts("PASS lift: real PWM endpoints, pentagonal prism 90deg/1166us/cache/lift, configured cylinder depth, invalid targets, wait failure/recovery");
   return 0;
 }

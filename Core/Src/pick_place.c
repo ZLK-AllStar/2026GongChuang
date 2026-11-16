@@ -71,6 +71,11 @@ static bool PickPlace_LowerCup(HMI_Shape_t shape)
     AppDisplay_SetCommand("LOWER CYLINDER");
     return AuxServo_LiftTo(AUX_SERVO_LIFT_DOWN_ANGLE_CYLINDER);
   }
+  else if (shape == HMI_SHAPE_PENTA_PRISM)
+  {
+    AppDisplay_SetCommand("LOWER PENTA");
+    return AuxServo_LiftTo(AUX_SERVO_LIFT_DOWN_ANGLE_PENTA_PRISM);
+  }
   else
   {
     AppDisplay_SetCommand("LOWER");

@@ -68,7 +68,8 @@ bool AuxServo_LiftDownFull(void) { Mark('F'); lowers++; lower_angle=AUX_SERVO_LI
 bool AuxServo_LiftTo(uint16_t angle) { Mark('C'); lowers++; lower_angle=angle; return lower_ok && !AppRuntime_Expired(); }
 bool Vacuum_PickAndHold(void) {
   HMI_Shape_t shape=HMI_CodeShape(current_code);
-  uint16_t expected=shape==HMI_SHAPE_CYLINDER ? 130U :
+  uint16_t expected=shape==HMI_SHAPE_PENTA_PRISM ? 90U :
+    shape==HMI_SHAPE_CYLINDER ? AUX_SERVO_LIFT_DOWN_ANGLE_CYLINDER :
     shape==HMI_SHAPE_CUBOID ? AUX_SERVO_LIFT_DOWN_ANGLE_FULL : AUX_SERVO_LIFT_DOWN_ANGLE;
   assert(lower_angle==expected); picks++; Mark('P'); return !AppRuntime_Expired();
 }
@@ -207,17 +208,21 @@ int main(int argc,char **argv) {
       unsigned previous_lowers=lowers, previous_records=records, previous_done=done;
       Inject(current_seq,current_code,current_x,current_y); AppController_Poll();
       assert(moves==3 && lowers==previous_lowers+1 && records==previous_records+1 && done==previous_done+1);
-      if ((i>=37 && i<=45) || i==77) assert(lower_angle==130U);
+      if ((i>=19 && i<=27) || i==75) assert(lower_angle==90U);
+      if ((i>=37 && i<=45) || i==77) assert(lower_angle==AUX_SERVO_LIFT_DOWN_ANGLE_CYLINDER);
       Inject(current_seq,current_code,current_x,current_y); AppController_Poll();
       assert(moves==3 && lowers==previous_lowers+1 && records==previous_records+1);
     }
-    // A cylinder lowering failure cannot start suction or report a release.
-    current_code=37; current_seq=171; moves=0; lower_ok=false;
-    unsigned previous_picks=picks, previous_records=records, previous_fails=fails;
-    Inject(current_seq,current_code,current_x,current_y); AppController_Poll();
-    assert(moves==1 && picks==previous_picks && records==previous_records && fails==previous_fails+1);
+    // A shape-specific lowering failure cannot start suction or report a release.
+    lower_ok=false;
+    for (i=0;i<2;i++) {
+      current_code=i==0 ? 37 : 19; current_seq=(uint8_t)(171+i); moves=0;
+      unsigned previous_picks=picks, previous_records=records, previous_fails=fails;
+      Inject(current_seq,current_code,current_x,current_y); AppController_Poll();
+      assert(moves==1 && picks==previous_picks && records==previous_records && fails==previous_fails+1);
+    }
     lower_ok=true;
-    puts("PASS pickup depth: all 90 codes, ten cylinder colors at 130deg, duplicates, lowering failure guard");
+    puts("PASS pickup depth: all 90 codes, ten pentagonal prism colors at 90deg, configured cylinder depth, duplicates, lowering failure guards");
     Classification_Init();
     assert(Classification_Assign(0)==0 && Classification_Assign(91)==0);
     for (i=1;i<=90;i++) assert(Classification_Assign((uint8_t)i)==(i-1)%6+1);

@@ -94,6 +94,15 @@ HELLO_STATE_READY = 0x01
 # 与固件 app_config.h 中的 Y 工作空间上限一致。
 MACHINE_Y_MAX_MM = 205.0
 
+# ==================== 机械坐标修正（现场可直接修改） ====================
+# 在标定转换后修正一次：发送 X = 标定 X * SCALE + OFFSET_MM，Y 同理。
+# 固定偏差只改 OFFSET_MM（毫米）；偏差随坐标增大时可调整 SCALE。
+# 正偏移增大对应机械坐标，负偏移减小；修改后重启识别程序生效。
+MACHINE_X_SCALE = 1.0
+MACHINE_Y_SCALE = 1.0
+MACHINE_X_OFFSET_MM = 0.0
+MACHINE_Y_OFFSET_MM = 0.0
+
 # OpenCV HSV 范围：H=0..179，S=0..255，V=0..255。
 # 每个颜色可配置多个区间，例如红色跨越 H 轴首尾，需要两个区间。
 # 现场光线改变后，主要调整这里的阈值。
@@ -551,6 +560,16 @@ def load_calibration(path: Path = DEFAULT_CALIBRATION_FILE) -> Optional[np.ndarr
     return homography
 
 
+def correct_machine_coordinates(x_mm: float, y_mm: float) -> Optional[Tuple[float, float]]:
+    """修正标定坐标；显示、目标筛选和串口共用结果，重发不重复修正。"""
+    x_mm = x_mm * MACHINE_X_SCALE + MACHINE_X_OFFSET_MM
+    y_mm = y_mm * MACHINE_Y_SCALE + MACHINE_Y_OFFSET_MM
+    if not math.isfinite(x_mm) or not math.isfinite(y_mm):
+        return None
+    # 修正后再限幅；其余坐标合法性由调用方按原规则检查。
+    return x_mm, min(y_mm, MACHINE_Y_MAX_MM)
+
+
 def pixel_to_machine(
     pixel: Tuple[int, int], homography: Optional[np.ndarray]
 ) -> Optional[Tuple[float, float]]:
@@ -562,8 +581,7 @@ def pixel_to_machine(
     converted = cv2.perspectiveTransform(point, homography)[0, 0]
     if not np.isfinite(converted).all():
         return None
-    # 先限幅再筛选/显示，避免超过 Y 行程的目标被丢弃。
-    return float(converted[0]), min(float(converted[1]), MACHINE_Y_MAX_MM)
+    return correct_machine_coordinates(float(converted[0]), float(converted[1]))
 
 
 def resolve_protocol_shape(projection: str, color: str) -> Optional[str]:
@@ -1643,6 +1661,10 @@ def main() -> None:
     detected_auto_roi = detect_tray_roi(frame) if auto_roi_enabled else None
     # 标定矩阵只需在启动时计算一次，之后每帧复用。
     homography = load_calibration(args.calibration_file)
+    print(
+        f"Machine coordinate correction: X scale={MACHINE_X_SCALE:g}, offset={MACHINE_X_OFFSET_MM:g} mm; "
+        f"Y scale={MACHINE_Y_SCALE:g}, offset={MACHINE_Y_OFFSET_MM:g} mm"
+    )
     # 摄像头实时模式默认直接打开 UART1；单张图片测试不会连接 STM32。
     if not args.no_serial and not is_single_image:
         serial_link = SerialLink(args.serial_port, args.baudrate, debug=args.serial_debug)

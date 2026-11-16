@@ -1,6 +1,6 @@
 """YOLO 彩色图形状检测 + HSV 五色识别 + 像素/机械坐标显示。
 
-默认加载同目录 best.engine；缺失时依次回退到同目录、工程 train13 的 best.pt。
+模型路径由下方 DEFAULT_MODEL 指定，支持 .pt 或 .engine 文件。
 Jetson/Linux 默认打开 /dev/ttyTHS1，等待 STM32 的 PE2 按下事件后连续抓取。
 每秒发送上线心跳；--no-serial 可仅预览。
 映射表包含原 1..80 和新增圆锥 81..90；圆锥按相同稳定条件参与抓取。
@@ -27,13 +27,10 @@ PROJECT_DIR = SCRIPT_DIR.parent
 CONFIG_DIR = SCRIPT_DIR / "config"
 DEFAULT_ROI_FILE = CONFIG_DIR / "roi.json"
 DEFAULT_CALIBRATION_FILE = CONFIG_DIR / "calibration.json"
-# Jetson 部署时把转换好的 best.engine 放在脚本旁，优先使用 TensorRT 引擎。
-# 没有引擎文件时仍可用 best.pt；这里只处理文件缺失，不掩盖引擎加载错误。
-DEFAULT_MODEL = SCRIPT_DIR / "best.engine"
-if not DEFAULT_MODEL.is_file():
-    DEFAULT_MODEL = SCRIPT_DIR / "best.pt"
-if not DEFAULT_MODEL.is_file():
-    DEFAULT_MODEL = PROJECT_DIR / "runs" / "detect" / "train13" / "weights" / "best.pt"
+# 在这里填写实际模型的完整路径，支持 .pt 和 .engine；找不到文件时直接提示错误。
+# Jetson 示例：Path(r"/home/jetson/classic/best.engine")
+# Windows 示例：Path(r"D:\YOLOv8\classic\best.pt")
+DEFAULT_MODEL = Path(r"/home/jetson/classic/best.engine")
 # Jetson Orin Nano 40 Pin 排针 UART1：Pin 8=TX，Pin 10=RX。
 # 若实际系统映射不同，仍可通过 --serial-port 临时覆盖。
 DEFAULT_SERIAL_PORT = "/dev/ttyTHS1"
@@ -56,14 +53,14 @@ SHAPE_ORDER = (
 )
 COLOR_ORDER = ("red", "orange", "yellow", "green", "cyan", "blue", "purple", "gray", "black")
 
-# 抓取优先级独立于串口形状编号：长方体、正方体、五棱柱、圆柱、圆锥、三棱锥。
+# 抓取优先级独立于串口形状编号：五棱柱、长方体、正方体、圆柱、三棱锥、圆锥。
 PICK_SHAPE_PRIORITY = {
-    "cuboid": 6,
-    "cube": 5,
-    "pentagonal_prism": 4,
+    "pentagonal_prism": 6,
+    "cuboid": 5,
+    "cube": 4,
     "cylinder": 3,
-    "cone": 2,
-    "regular_tetrahedron": 1,
+    "regular_tetrahedron": 2,
+    "cone": 1,
 }
 
 # 完整业务映射表：十进制整数会直接装入 CMD 字节，例如白色正方体 79 = 0x4F。
@@ -159,6 +156,15 @@ HELLO_STATE_READY = 0x01
 MACHINE_X_MAX_MM = 215.0
 MACHINE_Y_MAX_MM = 205.0
 
+# ==================== 机械坐标修正（现场可直接修改） ====================
+# 在标定转换后修正一次：发送 X = 标定 X * SCALE + OFFSET_MM，Y 同理。
+# 固定偏差只改 OFFSET_MM（毫米）；偏差随坐标增大时可调整 SCALE。
+# 正偏移增大对应机械坐标，负偏移减小；修改后重启识别程序生效。
+MACHINE_X_SCALE = 1.0
+MACHINE_Y_SCALE = 1.0
+MACHINE_X_OFFSET_MM = 7.0
+MACHINE_Y_OFFSET_MM = 8
+
 # OpenCV HSV 范围：H=0..179，S=0..255，V=0..255。
 # 每个颜色可配置多个区间，例如红色跨越 H 轴首尾，需要两个区间。
 # 现场光线改变后，主要调整这里的阈值。
@@ -169,6 +175,17 @@ COLOR_RANGES = {
     "blue": [((90, 50, 30), (135, 255, 255))],
     "white": [((0, 0, 145), (179, 65, 255))],
 }
+
+# 白色高光占优时，检查侧面可靠色块；蓝色更严格，以保护白色物料的蓝色阴影。
+HIGHLIGHT_COLOR_RULES = {
+    "red": (90, 0.08),
+    "yellow": (90, 0.08),
+    "green": (90, 0.08),
+    "blue": (120, 0.12),
+}
+HIGHLIGHT_MIN_VALUE = 45
+HIGHLIGHT_MIN_COMPONENT_SHARE = 0.60
+HIGHLIGHT_MIN_COLOR_DOMINANCE = 1.50
 
 DRAW_COLORS = {
     "red": (0, 0, 255),
@@ -229,7 +246,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--device", default=None, help="Inference device, e.g. 0 or cpu; default is automatic")
     source = parser.add_mutually_exclusive_group()
     source.add_argument("--image", type=Path, help="Process one image instead of a camera")
-    source.add_argument("--camera", type=int, default=0, help="USB camera index")
+    # 保留两份文件各自的现场默认值：Jetson 摄像头 0，Windows 摄像头 1。
+    source.add_argument("--camera", type=int, default=0 if sys.platform.startswith("linux") else 1, help="USB camera index")
     parser.add_argument("--width", type=int, default=1280, help="Camera width")
     parser.add_argument("--height", type=int, default=720, help="Camera height")
     parser.add_argument("--fps", type=int, default=30, help="Requested camera frame rate")
@@ -616,6 +634,16 @@ def load_calibration(path: Path = DEFAULT_CALIBRATION_FILE) -> Optional[np.ndarr
     return homography
 
 
+def correct_machine_coordinates(x_mm: float, y_mm: float) -> Optional[Tuple[float, float]]:
+    """修正标定坐标；显示、目标筛选和串口共用结果，重发不重复修正。"""
+    x_mm = x_mm * MACHINE_X_SCALE + MACHINE_X_OFFSET_MM
+    y_mm = y_mm * MACHINE_Y_SCALE + MACHINE_Y_OFFSET_MM
+    if not math.isfinite(x_mm) or not math.isfinite(y_mm):
+        return None
+    # 修正后再限幅；其余坐标合法性由调用方按原规则检查。
+    return x_mm, min(y_mm, MACHINE_Y_MAX_MM)
+
+
 def pixel_to_machine(
     pixel: Tuple[int, int], homography: Optional[np.ndarray]
 ) -> Optional[Tuple[float, float]]:
@@ -627,8 +655,7 @@ def pixel_to_machine(
     converted = cv2.perspectiveTransform(point, homography)[0, 0]
     if not np.isfinite(converted).all():
         return None
-    # 先限幅再筛选/显示，避免超过 Y 行程的目标被丢弃。
-    return float(converted[0]), min(float(converted[1]), MACHINE_Y_MAX_MM)
+    return correct_machine_coordinates(float(converted[0]), float(converted[1]))
 
 
 def resolve_protocol_shape(projection: str, color: str) -> Optional[str]:
@@ -918,7 +945,7 @@ class PickController:
         )
 
     def _select_target(self, detections: List[Detection], now: float) -> Optional[Detection]:
-        """先按形状优先级选择；同类优先选择空旷且移动距离较短的目标。"""
+        """先按形状选择；正方体、长方体同类中白色最后，再比较空旷和移动距离。"""
 
         sendable = [
             detection
@@ -938,7 +965,7 @@ class PickController:
             if detection.machine_center is not None
         ]
 
-        def priority(detection: Detection) -> Tuple[int, float, float, float]:
+        def priority(detection: Detection) -> Tuple[int, int, float, float, float]:
             position = detection.machine_center
             assert position is not None
             neighbor_distances = [
@@ -950,7 +977,12 @@ class PickController:
             travel = self._distance(position, self.last_gripper_position)
             # clearance 越大越不容易碰到其他物体；travel 只作为较小的移动代价。
             score = clearance - 0.15 * travel
-            return PICK_SHAPE_PRIORITY.get(detection.shape, 0), score, -position[1], -position[0]
+            # 同为正方体或同为长方体时，其他颜色均优先于白色。
+            color_priority = 0 if detection.shape in ("cube", "cuboid") and detection.color == "white" else 1
+            return (
+                PICK_SHAPE_PRIORITY.get(detection.shape, 0), color_priority,
+                score, -position[1], -position[0],
+            )
 
         return max(sendable, key=priority)
 
@@ -1270,10 +1302,19 @@ def make_foreground_mask(roi: np.ndarray, min_lab_distance: float) -> np.ndarray
     return foreground
 
 
+def prepare_color_hsv(roi: np.ndarray, processing_scale: float = 1.0) -> np.ndarray:
+    """每帧只做一次平滑和 HSV 转换，颜色掩膜与高光复核共享同一图像。"""
+    blur_size = max(3, int(round(5 * processing_scale)))
+    if blur_size % 2 == 0:
+        blur_size += 1
+    return cv2.cvtColor(cv2.GaussianBlur(roi, (blur_size, blur_size), 0), cv2.COLOR_BGR2HSV)
+
+
 def make_color_masks(
     roi: np.ndarray,
     background_mask: np.ndarray,
     processing_scale: float = 1.0,
+    hsv_image: Optional[np.ndarray] = None,
 ) -> Dict[str, np.ndarray]:
     """按 HSV 阈值生成五种颜色的掩膜，供 YOLO 框内投票；不判断几何形状。"""
 
@@ -1282,9 +1323,7 @@ def make_color_masks(
         size = max(3, int(round(base_size * processing_scale)))
         return size if size % 2 == 1 else size + 1
 
-    blur_size = scaled_odd_size(5)
-    blurred = cv2.GaussianBlur(roi, (blur_size, blur_size), 0)
-    hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
+    hsv = prepare_color_hsv(roi, processing_scale) if hsv_image is None else hsv_image
     open_size = scaled_odd_size(5)
     close_size = scaled_odd_size(9)
     open_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (open_size, open_size))
@@ -1310,6 +1349,8 @@ def classify_box_color(
     masks: Dict[str, np.ndarray],
     box: Tuple[float, float, float, float],
     roi_size: Tuple[int, int],
+    hsv_image: np.ndarray,
+    valid_mask: Optional[np.ndarray] = None,
 ) -> str:
     """只在检测框内部统计 HSV；优先使用彩色像素，避免黑托盘和白色反光干扰。"""
     roi_width, roi_height = roi_size
@@ -1323,13 +1364,47 @@ def classify_box_color(
     bottom = min(mask_height, int(math.ceil((y2 - inset_y) * mask_height / roi_height)))
     if right <= left or bottom <= top:
         return "unknown"
-    counts = {name: cv2.countNonZero(mask[top:bottom, left:right]) for name, mask in masks.items()}
-    inner_area = (right - left) * (bottom - top)
+    valid_crop = None if valid_mask is None else valid_mask[top:bottom, left:right]
+    inner_area = (right - left) * (bottom - top) if valid_crop is None else cv2.countNonZero(valid_crop)
+    if inner_area == 0:
+        return "unknown"
+    # 边缘框只统计四边形内的有效面积，框外区域既不能提供颜色，也不能稀释比例。
+    counts = {
+        name: cv2.countNonZero(mask[top:bottom, left:right] if valid_crop is None else
+                              cv2.bitwise_and(mask[top:bottom, left:right], valid_crop))
+        for name, mask in masks.items()
+    }
     chromatic = sorted(((counts[name], name) for name in ("red", "yellow", "green", "blue")), reverse=True)
     count, color = chromatic[0]
     # 白色物料的阴影/反射可能略偏蓝或偏绿。白色占绝对多数时，
-    # 不让少量带色像素把整个白色物料改判为蓝色或绿色。
+    # 用更可靠的侧面色块复核，而不是让少量浅色反光推翻白色。
     if counts["white"] >= max(8, inner_area * 0.55) and counts["white"] >= 2.0 * count:
+        hsv_crop = hsv_image[top:bottom, left:right]
+        strong_masks = {}
+        strong_counts = {}
+        for name, (min_saturation, _) in HIGHLIGHT_COLOR_RULES.items():
+            strong_mask = np.zeros(hsv_crop.shape[:2], dtype=np.uint8)
+            for lower, upper in COLOR_RANGES[name]:
+                strong_lower = (lower[0], max(lower[1], min_saturation), max(lower[2], HIGHLIGHT_MIN_VALUE))
+                strong_mask |= cv2.inRange(
+                    hsv_crop, np.asarray(strong_lower, dtype=np.uint8), np.asarray(upper, dtype=np.uint8)
+                )
+            # 只做开运算去掉孤立点；不闭运算，避免跨过白色区域人为连接色斑。
+            strong_mask = cv2.morphologyEx(strong_mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+            if valid_crop is not None:
+                strong_mask = cv2.bitwise_and(strong_mask, valid_crop)
+            strong_masks[name] = strong_mask
+            strong_counts[name] = cv2.countNonZero(strong_mask)
+        ranked = sorted(((value, name) for name, value in strong_counts.items()), reverse=True)
+        strong_count, strong_color = ranked[0]
+        min_area = max(8, inner_area * HIGHLIGHT_COLOR_RULES[strong_color][1])
+        if strong_count >= min_area and strong_count >= ranked[1][0] * HIGHLIGHT_MIN_COLOR_DOMINANCE:
+            component_count, _, stats, _ = cv2.connectedComponentsWithStats(
+                strong_masks[strong_color], connectivity=8
+            )
+            largest_area = int(np.max(stats[1:, cv2.CC_STAT_AREA])) if component_count > 1 else 0
+            if largest_area >= min_area and largest_area >= strong_count * HIGHLIGHT_MIN_COMPONENT_SHARE:
+                return strong_color
         return "white"
     # 彩色物体的高光可能落入白色阈值，因此有足够彩色证据时不被高光改成白色。
     if count >= max(8, inner_area * 0.05):
@@ -1598,7 +1673,13 @@ def process_frame(
     # 框已经由 YOLO 给出，无需先按托盘颜色去背景，避免把白色物料一并滤掉。
     color_region = (np.full(roi_image.shape[:2], 255, dtype=np.uint8) if polygon_mask is None else
                     cv2.resize(polygon_mask, (processed_width, processed_height), interpolation=cv2.INTER_NEAREST))
-    masks = make_color_masks(roi_image, color_region, processing_scale)
+    # 四边形外先遮黑再平滑，避免框外物体颜色在模糊时混入边缘；
+    # 共享 HSV 也要遮罩，否则高光复核会重新统计到四边形外的彩色像素。
+    color_image = roi_image if polygon_mask is None else cv2.bitwise_and(roi_image, roi_image, mask=color_region)
+    hsv_image = prepare_color_hsv(color_image, processing_scale)
+    if polygon_mask is not None:
+        hsv_image[color_region == 0] = 0
+    masks = make_color_masks(roi_image, color_region, processing_scale, hsv_image=hsv_image)
     if polygon_mask is not None:
         masks = {name: cv2.bitwise_and(mask, color_region) for name, mask in masks.items()}
     detections = []
@@ -1619,7 +1700,7 @@ def process_frame(
             continue
         class_id = int(prediction[-1])
         model_class = str(detector.names[class_id])
-        color = classify_box_color(masks, (x1, y1, x2, y2), (width, height))
+        color = classify_box_color(masks, (x1, y1, x2, y2), (width, height), hsv_image, valid_mask=color_region)
         protocol_shape = resolve_protocol_shape(model_class, color)
         left, top = int(math.floor(x1)), int(math.floor(y1))
         detection = Detection(
@@ -1649,6 +1730,8 @@ def process_frame(
 
 
 # ==================== 7. 摄像头、画面显示与程序主循环 ====================
+
+
 def open_camera(
     index: int, width: int, height: int, fps: int, use_mjpeg: bool
 ) -> cv2.VideoCapture:
@@ -1712,6 +1795,10 @@ def main() -> None:
     detected_auto_roi = detect_tray_roi(frame) if auto_roi_enabled else None
     # 标定矩阵只需在启动时计算一次，之后每帧复用。
     homography = load_calibration(args.calibration_file)
+    print(
+        f"Machine coordinate correction: X scale={MACHINE_X_SCALE:g}, offset={MACHINE_X_OFFSET_MM:g} mm; "
+        f"Y scale={MACHINE_Y_SCALE:g}, offset={MACHINE_Y_OFFSET_MM:g} mm"
+    )
     # Jetson/Linux 默认连接原 UART。--no-serial 或单张图片模式只显示、不发送。
     if args.serial_port and not args.no_serial and not is_single_image:
         serial_link = SerialLink(args.serial_port, args.baudrate, debug=args.serial_debug)
@@ -1884,7 +1971,7 @@ def main() -> None:
             )
             if key in (ord("q"), 27):
                 break
-            if key == ord("r"):
+            if key in (ord("r"), ord("R")):
                 if pick_controller is not None and pick_controller.state in ("WAIT_ACK", "PICKING"):
                     print("ROI selection waits until the current pick and HOME are complete")
                     continue
